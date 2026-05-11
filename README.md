@@ -212,5 +212,3 @@ Abre un issue o un PR.
 ## Autor original
 
 Javier Ramírez Bandera — Arquitecto, COA Málaga.
-
-Esta skill fue diseñada iterativamente con [Claude Code](https://claude.com/claude-code) a partir del flujo de trabajo real del autor, y publicada como herramienta abierta para la comunidad pericial.
