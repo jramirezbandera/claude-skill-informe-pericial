@@ -1,0 +1,79 @@
+# Esquema del archivo caso.yaml — uno por encargo
+# Campos obligatorios marcados con [OBLIG]; opcionales con [OPC]
+# La skill rellena automáticamente lo que pueda extraer de los PDFs y pregunta
+# de forma simple sólo lo que falte.
+
+codigo: "2025_017"                          # [OBLIG] formato YYYY_NNN, asignado por el usuario
+titulo_corto: "García López — Vélez-Málaga" # [OBLIG] usado en cabecera
+
+cliente:
+  nombre: ""                                # [OBLIG] persona física o jurídica
+  dni_cif: ""                               # [OPC]
+  rol: ""                                   # [OBLIG] actora | demandada | extrajudicial
+  representado_por:
+    abogado: ""                             # [OPC]
+    procurador: ""                          # [OPC]
+
+inmueble:
+  denominacion: ""                          # [OPC] ej. "Conjunto residencial Bayview"
+  direccion: ""                             # [OBLIG] calle, número, CP, municipio, provincia
+  ref_catastral: ""                         # [OPC]
+  tipologia: ""                             # [OBLIG] vivienda unifamiliar | promoción plurifamiliar | local | nave | otro
+  superficie_construida_m2: null            # [OPC]
+
+procedimiento:
+  tipo: ""                                  # [OBLIG] judicial | extrajudicial | pre-litigio
+  juzgado: ""                               # [OPC] sólo si judicial
+  numero_autos: ""                          # [OPC]
+
+agentes_obra:
+  promotor: ""                              # [OPC]
+  constructor: ""                           # [OPC]
+  proyectista: ""                           # [OPC]
+  direccion_facultativa: ""                 # [OPC]
+  direccion_ejecucion: ""                   # [OPC]
+  fecha_inicio_obra: ""                     # [OPC] ISO YYYY-MM-DD
+  fecha_fin_obra: ""                        # [OPC] ISO YYYY-MM-DD
+  fecha_recepcion: ""                       # [OPC] ISO YYYY-MM-DD
+
+fechas:
+  encargo: ""                               # [OBLIG] ISO YYYY-MM-DD
+  visita: ""                                # [OBLIG] ISO YYYY-MM-DD
+  entrega_prevista: ""                      # [OPC] ISO YYYY-MM-DD
+
+objeto_pericial: |                          # [OBLIG] qué pide el encargante exactamente
+  Descripción libre. La skill la extrae de 00_encargo/objeto_pericial.md
+  o de la hoja de encargo.
+
+documentos_disponibles:                     # [AUTO] la skill lo rellena al detectar archivos
+  proyecto_visado: false
+  memoria_calidades: false
+  contrato_obra: false
+  certificaciones_obra: false
+  actas_obra: false
+  licencia_obra: false
+  escritura: false
+  informe_contraria: false
+  alegaciones_contraria: false
+  comunicaciones: false                     # emails, burofax, whatsapp
+  ensayos: false
+
+secciones_a_incluir:                        # toggles del informe
+  metodologia: true                         # incluir sección 5 Metodología
+  desarrollo_anormal_obra: false            # sólo si hubo incidencias documentadas
+  delimitacion_ambito: false                # subsección 4.5 cuando hay zonas dudosas
+  analisis_critico_contraria: false         # auto-true si existe informe contraria
+  penalizaciones_retraso: false
+  hoja_resumen_presupuesto: true
+
+template_deficiencia: "estandar"            # estandar (5 apartados) | extendido (con menciones a actas) | minimo (sin certificacion)
+
+deficiencias: []                            # se rellena con /informe notas o manualmente
+# Cada deficiencia tiene la forma:
+# - id: 1
+#   slug: "humedades_garaje"
+#   titulo: "Humedades en muros del garaje"
+#   capitulo_presupuesto: "CAPÍTULO 03"     # mapeo a docx de Arquímedes
+#   notas_origen: "notas_tablet/pag3 + fotos P012-P018"
+#   borrador_redactado: false
+#   presupuesto_inyectado: false

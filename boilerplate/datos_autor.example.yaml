@@ -1,0 +1,17 @@
+# Copia este fichero a `datos_autor.yaml` (sin .example) y rellena con tus datos.
+# La skill lo usa en portada, pie de firma, sección 1 (consideraciones previas)
+# y cualquier sitio donde se identifique al autor del dictamen.
+
+nombre_completo: "Nombre Apellidos"
+titulacion: "Arquitecto"               # o "Arquitecto Técnico", "Ingeniero…", etc.
+colegiado: "1.234"
+colegio: "Colegio Oficial de Arquitectos de <Provincia>"
+formacion_extra:
+  - "Titulación principal por la Universidad de …"
+  - "Máster en … por …"
+  # añade las líneas que necesites; usadas opcionalmente en la portada extendida
+despacho:
+  calle: "C/ Ejemplo 1, 1ºA"
+  cp: "29000"
+  ciudad: "Málaga"
+email: "tu.email@dominio.es"

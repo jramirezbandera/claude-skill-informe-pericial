@@ -1,0 +1,37 @@
+# Datos personales: cada instalación tiene su propio datos_autor.yaml
+boilerplate/datos_autor.yaml
+
+# Workspace temporal generado por la skill en cada encargo
+_skill_workspace/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backups y temporales
+*.bak
+*.tmp
+*.docx#
+~$*.docx
+~$*.xlsx
+
+# Test outputs
+test_output/
+test_*.docx
