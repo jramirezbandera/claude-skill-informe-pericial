@@ -4,7 +4,7 @@ NO genera caso.yaml — eso lo escribe la skill (Claude) directamente con
 los datos que recopile en la conversación interactiva.
 
 Por defecto crea la carpeta DENTRO del directorio de trabajo actual (cwd).
-el usuario hace `cd` al sitio donde quiere el encargo y ahí se materializa.
+Javier hace `cd` al sitio donde quiere el encargo y ahí se materializa.
 
 Uso:
     cd "Z:\\03-INFORME\\AÑO 2026"

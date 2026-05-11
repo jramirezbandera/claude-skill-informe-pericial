@@ -1,6 +1,6 @@
 """Procesa el volcado de fotos del móvil para un encargo.
 
-Origen: carpeta de Google Drive del encargo (Drive for Desktop), dondel usuario
+Origen: carpeta de Google Drive del encargo (Drive for Desktop), donde Javier
 sube las fotos directamente desde la galería del móvil. Esto preserva los
 metadatos EXIF (DateTimeOriginal), a diferencia del flujo antiguo de WhatsApp.
 
@@ -10,7 +10,7 @@ Fase 1 — copiado + renombrado:
     Ordena por fecha real y renombra a P001.jpg, P002.jpg…
     Genera 04_inspeccion/fotos/INDICE.md.
     Genera 04_inspeccion/clasificacion_fotos.xlsx con MINIATURAS embebidas
-    para que el usuario rellene Deficiencia + Descripción de cada foto.
+    para que Javier rellene Deficiencia + Descripción de cada foto.
     Si todas las fotos tienen EXIF, escribe 04_inspeccion/fecha_inspeccion.txt
     con el rango de fechas detectado.
 
@@ -18,7 +18,7 @@ Fase 1 — copiado + renombrado:
     04_inspeccion/fotos/ (compatible con flujo antiguo / volcados manuales).
 
 Fase 2 — aplicar Excel (RECOMENDADO):
-    Lee 04_inspeccion/clasificacion_fotos.xlsx (rellenado por el usuario),
+    Lee 04_inspeccion/clasificacion_fotos.xlsx (rellenado por Javier),
     mueve cada foto a 04_inspeccion/fotos_renombradas/ con nombre
     P001_DEFNN_slug.jpg (slug derivado de la descripción), y escribe
     _skill_workspace/fotos_descripciones.json con las descripciones
@@ -459,7 +459,7 @@ def escribir_fecha_inspeccion(encargo: Path, fotos: list[Path]) -> None:
     fmax = max(fechas_exif).date()
     txt = encargo / "04_inspeccion" / "fecha_inspeccion.txt"
     if txt.exists() and txt.read_text(encoding="utf-8").strip():
-        return  # respeta lo que el usuario ya haya puesto
+        return  # respeta lo que Javier ya haya puesto
     if fmin == fmax:
         contenido = f"{fmin.isoformat()}\n"
     else:

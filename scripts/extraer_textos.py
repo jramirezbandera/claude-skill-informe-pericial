@@ -215,7 +215,7 @@ def main(argv: list[str]) -> int:
     md.append("## Cómo usar este inventario")
     md.append("")
     md.append("- Los archivos `.txt` paralelos a cada PDF/DOCX contienen el texto extraído. Léelos con Read tool.")
-    md.append("- Los PDFs escaneados sin texto (estado ⚠) tienen un `.preview.png` para una mirada rápida; pide al usuario que los re-procese con OCR si son importantes.")
+    md.append("- Los PDFs escaneados sin texto (estado ⚠) tienen un `.preview.png` para una mirada rápida; pide a Javier que los re-procese con OCR si son importantes.")
     md.append("- Las imágenes/vídeos/audios sólo se listan para que sepas que existen; abrirlos requiere herramientas específicas.")
     md.append("")
     (workspace / "inventario.md").write_text("\n".join(md), encoding="utf-8")

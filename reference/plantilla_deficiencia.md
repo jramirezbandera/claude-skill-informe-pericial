@@ -67,7 +67,7 @@ Cuando una deficiencia es sólo descripción técnica sin valoración, sustituir
 Para que la fase 2 funcione, la convención es:
 
 - Cada deficiencia tiene un `slug` corto (ej. `humedades_garaje`).
-- Cuando el usuario monta el presupuesto en Presto/Arquímedes, cada CAPÍTULO debe nombrarse con el mismo slug en mayúsculas (ej. `CAPÍTULO 03 — HUMEDADES GARAJE`).
+- Cuando Javier monta el presupuesto en Presto/Arquímedes, cada CAPÍTULO debe nombrarse con el mismo slug en mayúsculas (ej. `CAPÍTULO 03 — HUMEDADES GARAJE`).
 - La skill detecta el match por nombre de capítulo y lo inyecta en el marcador correspondiente.
 
 Si una deficiencia no tiene capítulo en el presupuesto, la skill lo notifica como warning y deja el marcador con texto "PENDIENTE DE VALORACIÓN".

@@ -14,7 +14,7 @@ no es suficiente porque no borra binarios ni partes del zip.
 
 Uso:
     python extraer_plantilla.py --src "C:\\...\\INFORME CAORZA BENALMADENA_Vfinal.docx" \\
-                                --dst "C:\\Users\\el usuario\\.claude\\skills\\informe-pericial\\plantillas\\plantilla_base.docx"
+                                --dst "C:\\Users\\Javier\\.claude\\skills\\informe-pericial\\plantillas\\plantilla_base.docx"
 """
 from __future__ import annotations
 

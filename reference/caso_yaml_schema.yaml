@@ -3,7 +3,7 @@
 # La skill rellena automáticamente lo que pueda extraer de los PDFs y pregunta
 # de forma simple sólo lo que falte.
 
-codigo: "2025_017"                          # [OBLIG] formato YYYY_NNN, asignado por el usuario
+codigo: "2025_017"                          # [OBLIG] formato YYYY_NNN, asignado por Javier
 titulo_corto: "García López — Vélez-Málaga" # [OBLIG] usado en cabecera
 
 cliente:

@@ -75,13 +75,19 @@ def _add_heading(doc, texto: str, level: int) -> None:
 
 
 def _add_para(doc, texto: str, style: str = "Body Text") -> None:
-    """Añade un párrafo. Acepta '\\n\\n' para dividir en varios."""
+    """Añade un párrafo. Acepta '\\n\\n' para dividir en varios.
+
+    Los saltos de línea simples dentro de un bloque se colapsan a espacios
+    (estilo CommonMark): evita que python-docx emita <w:br/> que el estilo
+    justificado estira con huecos enormes.
+    """
     if not texto:
         return
     for bloque in re.split(r"\n\s*\n", texto.strip()):
         bloque = bloque.strip()
         if not bloque:
             continue
+        bloque = re.sub(r"\s*\n\s*", " ", bloque)
         p = doc.add_paragraph()
         try:
             p.style = doc.styles[style]
@@ -94,6 +100,70 @@ def _add_para(doc, texto: str, style: str = "Body Text") -> None:
                 run.bold = True
             else:
                 p.add_run(parte)
+
+
+def _add_markdown_content(doc, md: str) -> None:
+    """Vuelca un bloque markdown al docx procesando cabeceras, citas, listas y prosa.
+
+    Soporta:
+      - `# `   → Heading 1
+      - `## `  → Heading 2
+      - `### ` → Heading 3
+      - `> `   → blockquote (se ignora — uso interno de la skill como meta-info)
+      - `- ` o `* ` → bullet (List Bullet)
+      - líneas vacías → separador de párrafo
+      - separador horizontal `---` → se descarta
+      - resto → prosa con `**negrita**`
+    """
+    if not md:
+        return
+    paragraph_buf: list[str] = []
+
+    def flush_paragraph():
+        if paragraph_buf:
+            _add_para(doc, " ".join(paragraph_buf).strip())
+            paragraph_buf.clear()
+
+    for raw in md.splitlines():
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        # cabeceras
+        m_h = re.match(r"^(#{1,3})\s+(.+?)\s*$", stripped)
+        if m_h:
+            flush_paragraph()
+            level = len(m_h.group(1))
+            _add_heading(doc, m_h.group(2), level)
+            continue
+        # blockquote — se descarta (es meta-info de la skill)
+        if stripped.startswith(">"):
+            flush_paragraph()
+            continue
+        # bullets
+        m_b = re.match(r"^[-*]\s+(.+?)\s*$", stripped)
+        if m_b:
+            flush_paragraph()
+            try:
+                p = doc.add_paragraph(style="List Bullet")
+            except KeyError:
+                p = doc.add_paragraph()
+            for parte in re.split(r"(\*\*[^*]+\*\*)", m_b.group(1)):
+                if parte.startswith("**") and parte.endswith("**"):
+                    run = p.add_run(parte[2:-2])
+                    run.bold = True
+                else:
+                    p.add_run(parte)
+            continue
+        # línea vacía: separador
+        if not stripped:
+            flush_paragraph()
+            continue
+        # separador horizontal
+        if re.match(r"^-{3,}$", stripped):
+            flush_paragraph()
+            continue
+        # prosa: acumular
+        paragraph_buf.append(stripped)
+    flush_paragraph()
 
 
 def _add_picture_with_caption(doc, path: Path, num: int, descripcion: str, width_cm: float = 14.0) -> None:
@@ -256,7 +326,7 @@ def _fotos_de_deficiencia(fotos_dir: Path, def_id: int) -> list[Path]:
 
 
 def _descripcion_foto(p: Path, descripciones_json: dict | None = None) -> str:
-    """Prioridad: descripción de fotos_descripciones.json (texto libre del usuario).
+    """Prioridad: descripción de fotos_descripciones.json (texto libre de Javier).
     Fallback: slug del nombre de archivo.
     """
     if descripciones_json:
@@ -276,7 +346,7 @@ def _descripcion_foto(p: Path, descripciones_json: dict | None = None) -> str:
 # ────────── Secciones del informe ──────────
 
 def seccion_consideraciones(doc, caso: dict, objeto: str) -> None:
-    _add_heading(doc, "1. CONSIDERACIONES PREVIAS Y OBJETO DE TRABAJO", 1)
+    _add_heading(doc, "CONSIDERACIONES PREVIAS Y OBJETO DE TRABAJO", 1)
     autor = caso["_autor"]
     cliente = caso.get("cliente", {})
     nombre_cliente = cliente.get("nombre", "")
@@ -290,19 +360,19 @@ def seccion_consideraciones(doc, caso: dict, objeto: str) -> None:
     _add_para(doc, intro)
     if objeto:
         _add_para(doc, "El objeto del presente trabajo es:")
-        _add_para(doc, objeto)
+        _add_markdown_content(doc, objeto)
 
 
 def seccion_juramento(doc) -> None:
-    _add_heading(doc, "2. JURAMENTO DE ACTUAR CON OBJETIVIDAD", 1)
+    _add_heading(doc, "JURAMENTO DE ACTUAR CON OBJETIVIDAD", 1)
     juramento = (SKILL_ROOT / "boilerplate" / "juramento_objetividad.md").read_text(encoding="utf-8")
     _add_para(doc, juramento)
 
 
 def seccion_bases(doc, caso: dict, doc_consultada: str) -> None:
-    _add_heading(doc, "3. BASES DEL DICTAMEN. VISITA E INSPECCIÓN", 1)
+    _add_heading(doc, "BASES DEL DICTAMEN. VISITA E INSPECCIÓN", 1)
 
-    _add_heading(doc, "3.1. Visita de inspección", 2)
+    _add_heading(doc, "Visita de inspección", 2)
     fecha_visita = caso.get("fechas", {}).get("visita") or caso.get("_fecha_visita") or ""
     if fecha_visita:
         _add_para(doc, f"La visita de inspección al inmueble se realizó el día {_fmt_fecha_larga(fecha_visita)}, "
@@ -311,13 +381,13 @@ def seccion_bases(doc, caso: dict, doc_consultada: str) -> None:
     else:
         _add_para(doc, "[[FALTA: fecha de inspección]]")
 
-    _add_heading(doc, "3.2. Documentación examinada", 2)
+    _add_heading(doc, "Documentación examinada", 2)
     if doc_consultada:
-        _add_para(doc, doc_consultada)
+        _add_markdown_content(doc, doc_consultada)
     else:
         _add_para(doc, "[[FALTA: documentación consultada — generar en _skill_workspace/documentacion_consultada.md]]")
 
-    _add_heading(doc, "3.3. Alcance de esta base documental", 2)
+    _add_heading(doc, "Alcance de esta base documental", 2)
     _add_para(doc,
         "El presente dictamen se emite a partir de la documentación relacionada en el apartado precedente "
         "y de las observaciones realizadas durante la visita de inspección. Las conclusiones que se "
@@ -327,22 +397,22 @@ def seccion_bases(doc, caso: dict, doc_consultada: str) -> None:
 
 
 def seccion_antecedentes(doc, caso: dict, antecedentes_md: str) -> None:
-    _add_heading(doc, "4. ANTECEDENTES Y DESCRIPCIÓN DEL CONJUNTO", 1)
+    _add_heading(doc, "ANTECEDENTES Y DESCRIPCIÓN DEL CONJUNTO", 1)
     if antecedentes_md.strip():
-        _add_para(doc, antecedentes_md)
+        _add_markdown_content(doc, antecedentes_md)
         return
 
     # Fallback estructurado a partir de caso.yaml
     inm = caso.get("inmueble", {})
     ag = caso.get("agentes_obra", {})
 
-    _add_heading(doc, "4.1. Situación", 2)
+    _add_heading(doc, "Situación", 2)
     direccion = inm.get("direccion", "")
     _add_para(doc, f"El inmueble objeto del dictamen se encuentra en {direccion or '[[FALTA: dirección]]'}.")
     if inm.get("ref_catastral"):
         _add_para(doc, f"Referencia catastral: {inm['ref_catastral']}.")
 
-    _add_heading(doc, "4.2. Fechas de obra y agentes que intervinieron", 2)
+    _add_heading(doc, "Fechas de obra y agentes que intervinieron", 2)
     lineas = []
     for clave, etiqueta in [("promotor", "Promotor"), ("constructor", "Constructor"),
                              ("proyectista", "Proyectista"), ("direccion_facultativa", "Dirección facultativa"),
@@ -360,10 +430,10 @@ def seccion_antecedentes(doc, caso: dict, antecedentes_md: str) -> None:
     for l in lineas:
         _add_para(doc, l)
 
-    _add_heading(doc, "4.3. Ámbito de la prueba pericial solicitada", 2)
+    _add_heading(doc, "Ámbito de la prueba pericial solicitada", 2)
     _add_para(doc, caso.get("objeto_pericial") or "[[FALTA: objeto pericial]]")
 
-    _add_heading(doc, "4.4. Tipología y entorno", 2)
+    _add_heading(doc, "Tipología y entorno", 2)
     if inm.get("tipologia"):
         _add_para(doc, f"Tipología: {inm['tipologia']}.")
     if inm.get("superficie_construida_m2"):
@@ -373,7 +443,7 @@ def seccion_antecedentes(doc, caso: dict, antecedentes_md: str) -> None:
 def seccion_metodologia(doc, caso: dict) -> None:
     if not caso.get("secciones_a_incluir", {}).get("metodologia", True):
         return
-    _add_heading(doc, "5. METODOLOGÍA DE ANÁLISIS", 1)
+    _add_heading(doc, "METODOLOGÍA DE ANÁLISIS", 1)
     tpl = (SKILL_ROOT / "boilerplate" / "metodologia.md").read_text(encoding="utf-8")
     ctx = {
         "hay_informe_contraria": caso.get("secciones_a_incluir", {}).get("analisis_critico_contraria", False),
@@ -385,20 +455,20 @@ def seccion_metodologia(doc, caso: dict) -> None:
 def seccion_deficiencias(doc, caso: dict, deficiencias: list[dict],
                           redaccion: dict, fotos_dir: Path, workspace: Path,
                           fotos_descripciones: dict | None = None) -> None:
-    _add_heading(doc, "7. DEFICIENCIAS OBSERVADAS", 1)
+    _add_heading(doc, "DEFICIENCIAS OBSERVADAS", 1)
     contador_imagenes = 0
 
     for d in deficiencias:
         defcod = f"DEF{d['id']:02d}"
-        titulo = f"7.{d['id']}. {d['titulo'].upper()}"
+        titulo = d['titulo'].upper()
         _add_heading(doc, titulo, 2)
 
         prosa = redaccion.get(defcod, {})
 
         # 7.x.1 Existencia + fotos
-        _add_heading(doc, f"7.{d['id']}.1. Existencia", 3)
+        _add_heading(doc, "Existencia", 3)
         if prosa.get("existencia"):
-            _add_para(doc, prosa["existencia"])
+            _add_markdown_content(doc, prosa["existencia"])
         else:
             _add_para(doc, f"[[FALTA: redactar Existencia de {defcod} en _skill_workspace/redaccion_deficiencias.md]]")
 
@@ -409,38 +479,38 @@ def seccion_deficiencias(doc, caso: dict, deficiencias: list[dict],
             _add_picture_with_caption(doc, jpg, contador_imagenes, _descripcion_foto(foto, fotos_descripciones))
 
         # 7.x.2 Definición en proyecto y mediciones
-        _add_heading(doc, f"7.{d['id']}.2. Definición en proyecto y mediciones", 3)
+        _add_heading(doc, "Definición en proyecto y mediciones", 3)
         if prosa.get("definicion"):
-            _add_para(doc, prosa["definicion"])
+            _add_markdown_content(doc, prosa["definicion"])
         else:
             _add_para(doc, f"[[FALTA: redactar Definición en proyecto de {defcod}]]")
 
         # 7.x.3 Causa
-        _add_heading(doc, f"7.{d['id']}.3. Causa", 3)
+        _add_heading(doc, "Causa", 3)
         if prosa.get("causa"):
-            _add_para(doc, prosa["causa"])
+            _add_markdown_content(doc, prosa["causa"])
         else:
             _add_para(doc, f"[[FALTA: redactar Causa de {defcod}]]")
 
         # 7.x.4 Certificación (opcional)
         if prosa.get("certificacion"):
-            _add_heading(doc, f"7.{d['id']}.4. Certificación", 3)
-            _add_para(doc, prosa["certificacion"])
+            _add_heading(doc, "Certificación", 3)
+            _add_markdown_content(doc, prosa["certificacion"])
             offset = 1
         else:
             offset = 0
 
         # 7.x.5 Propuesta de reparación
-        _add_heading(doc, f"7.{d['id']}.{4 + offset}. Propuesta de reparación", 3)
+        _add_heading(doc, "Propuesta de reparación", 3)
         if prosa.get("propuesta"):
-            _add_para(doc, prosa["propuesta"])
+            _add_markdown_content(doc, prosa["propuesta"])
         else:
             _add_para(doc, f"[[FALTA: redactar Propuesta de reparación de {defcod}]]")
         _add_para(doc, f"[[PRESUPUESTO_DEFICIENCIA: {d['slug']}]]")
 
 
 def seccion_cuadro_resumen(doc, deficiencias: list[dict]) -> None:
-    _add_heading(doc, "10. CUADRO RESUMEN Y CONCLUSIONES", 1)
+    _add_heading(doc, "CUADRO RESUMEN Y CONCLUSIONES", 1)
     _add_para(doc, "Se relacionan a continuación las deficiencias analizadas, junto con su causa "
                    "atribuida y el coste estimado de reparación:")
 
@@ -459,7 +529,7 @@ def seccion_cuadro_resumen(doc, deficiencias: list[dict]) -> None:
 
 
 def seccion_pie_firma(doc, caso: dict, lugar: str, fecha_entrega: str) -> None:
-    _add_heading(doc, "12. FIRMA", 1)
+    _add_heading(doc, "FIRMA", 1)
     tpl = (SKILL_ROOT / "boilerplate" / "pie_firma.md").read_text(encoding="utf-8")
     autor = caso.get("_autor", {})
     ctx = {
@@ -592,8 +662,12 @@ def main(argv: list[str]) -> int:
     fecha_p.add_run(_fmt_fecha_larga(f_entrega))
     _add_page_break(doc)
 
-    # Índice
-    _add_heading(doc, "ÍNDICE", 1)
+    # Índice (no se aplica Heading 1 para evitar la auto-numeración)
+    idx = doc.add_paragraph()
+    idx.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = idx.add_run("ÍNDICE")
+    r.bold = True
+    r.font.size = Pt(18)
     _add_toc_placeholder(doc)
     _add_page_break(doc)
 
@@ -606,10 +680,10 @@ def main(argv: list[str]) -> int:
 
     # 6. Desarrollo anormal de la obra (opcional)
     if caso.get("secciones_a_incluir", {}).get("desarrollo_anormal_obra"):
-        _add_heading(doc, "6. DESARROLLO ANORMAL DE LA OBRA", 1)
+        _add_heading(doc, "DESARROLLO ANORMAL DE LA OBRA", 1)
         anormal_md = (ws / "desarrollo_anormal.md")
         if anormal_md.exists():
-            _add_para(doc, anormal_md.read_text(encoding="utf-8"))
+            _add_markdown_content(doc, anormal_md.read_text(encoding="utf-8"))
         else:
             _add_para(doc, "[[FALTA: redactar desarrollo_anormal.md]]")
 
@@ -617,19 +691,19 @@ def main(argv: list[str]) -> int:
 
     # 8. Análisis crítico contraria (opcional)
     if caso.get("secciones_a_incluir", {}).get("analisis_critico_contraria"):
-        _add_heading(doc, "8. ANÁLISIS CRÍTICO DEL INFORME DE LA ACTORA", 1)
+        _add_heading(doc, "ANÁLISIS CRÍTICO DEL INFORME DE LA ACTORA", 1)
         critico_md = (ws / "analisis_critico_contraria.md")
         if critico_md.exists():
-            _add_para(doc, critico_md.read_text(encoding="utf-8"))
+            _add_markdown_content(doc, critico_md.read_text(encoding="utf-8"))
         else:
             _add_para(doc, "[[FALTA: redactar analisis_critico_contraria.md]]")
 
     # 9. Penalizaciones (opcional)
     if caso.get("secciones_a_incluir", {}).get("penalizaciones_retraso"):
-        _add_heading(doc, "9. PENALIZACIONES Y RETRASO", 1)
+        _add_heading(doc, "PENALIZACIONES Y RETRASO", 1)
         pen_md = (ws / "penalizaciones.md")
         if pen_md.exists():
-            _add_para(doc, pen_md.read_text(encoding="utf-8"))
+            _add_markdown_content(doc, pen_md.read_text(encoding="utf-8"))
         else:
             _add_para(doc, "[[FALTA: redactar penalizaciones.md]]")
 
@@ -637,7 +711,7 @@ def main(argv: list[str]) -> int:
 
     # 11. Hoja resumen presupuesto (opcional)
     if caso.get("secciones_a_incluir", {}).get("hoja_resumen_presupuesto", True):
-        _add_heading(doc, "11. HOJA RESUMEN DE PRESUPUESTO", 1)
+        _add_heading(doc, "HOJA RESUMEN DE PRESUPUESTO", 1)
         _add_para(doc, "[[HOJA_RESUMEN_PRESUPUESTO — se inyecta en /informe presupuestar]]")
 
     seccion_pie_firma(doc, caso, args.lugar, f_entrega)
