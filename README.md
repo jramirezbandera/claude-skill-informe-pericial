@@ -1,5 +1,11 @@
 # claude-skill-informe-pericial
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Made with Claude Code](https://img.shields.io/badge/Made%20with-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Lang: español](https://img.shields.io/badge/lang-español-red.svg)](README.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/jramirezbandera/claude-skill-informe-pericial/pulls)
+
 Skill para [Claude Code](https://claude.com/claude-code) que asiste a peritos arquitectos en la **redacción de dictámenes periciales de patologías constructivas** en `.docx`. Cubre el flujo completo: creación del expediente, ingesta de documentación, clasificación de fotografías, redacción, inyección del presupuesto exportado de Presto/Arquímedes y aplicación de revisiones.
 
 > ⚠️ **No sustituye al criterio profesional.** Es una herramienta de ayuda. El perito firmante es responsable de revisar, validar y, en su caso, modificar todo lo que la skill produzca.
