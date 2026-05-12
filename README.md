@@ -178,7 +178,7 @@ Todos llevan `--help` y pueden usarse de forma standalone.
 - **Separación inteligencia / maquinaria.** La skill (Claude conversacional) toma las decisiones que requieren criterio profesional (causa, atribución, proporcionalidad de la reparación) y redacta la prosa. Los scripts solo ensamblan, no piensan.
 - **Memoria externa persistente.** Todo lo aprendido durante la ingesta se guarda en `_skill_workspace/` para sobrevivir a compactaciones de contexto.
 - **El humano aprueba antes de fases pesadas.** No se redactan 50 páginas sin checkpoint.
-- **El presupuesto lo hace Arquímedes, no la skill.** La skill solo trocea e inyecta el RTF de Presto.
+- **El presupuesto lo hace Arquímedes/Presto, no la skill.** La skill solo trocea e inyecta el RTF exportado del programa de mediciones.
 - **Datos faltantes son la norma.** Muchos encargos no tienen proyecto visado ni informe contraria. La skill degrada secciones, no se rompe.
 
 ## Limitaciones conocidas
