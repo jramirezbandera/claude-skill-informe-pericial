@@ -27,7 +27,7 @@ La skill automatiza ese trabajo mecánico, deja al perito centrarse en lo que s�
                                    + Excel para clasificar fotos + confirmación de huecos
 4. /informe deficiencias        → fija la lista de deficiencias
 5. /informe redactar            → genera informe_pericial_v1.docx (sin presupuestos)
-6. (medición en Presto, exportar RTF a 99_salida/presupuesto/)
+6. (medición en Presto/Arquímedes, exportar a 99_salida/presupuesto/)
 7. /informe presupuestar        → inyecta capítulos en cada deficiencia → v2.docx
 8. (revisión del usuario en Word: tracked changes + comentarios)
 9. /informe revisar             → acepta cambios, extrae comentarios → v3.docx
@@ -43,7 +43,7 @@ Cada subcomando es idempotente: puedes repetirlo si añades material nuevo.
 | `/informe ingestar` | Briefing narrativo corto + ingesta autónoma de PDFs/DOCX al `caso.yaml` + procesamiento de fotos (Drive + EXIF + Excel) + notas Notability. Genera `notas_por_documento.md` y `cronologia.md` como memoria externa persistente. |
 | `/informe deficiencias` | Fija la lista cerrada de deficiencias (modo dictado, edición manual de `deficiencias.md`, o aceptar propuesta autogenerada). |
 | `/informe redactar` | Ensambla `informe_pericial_v1.docx` desde plantilla + boilerplate + prosa redactada por la skill + fotos clasificadas. |
-| `/informe presupuestar` | Lee el RTF de Presto/Arquímedes, mapea subcapítulos a deficiencias y produce `v2.docx` con tablas de partidas + cuadro resumen + hoja resumen. |
+| `/informe presupuestar` | Lee el presupuesto exportado (RTF de Presto o los dos .docx de Arquímedes), mapea subcapítulos a deficiencias y produce `v2.docx` con tablas de partidas + cuadro resumen + hoja resumen. |
 | `/informe revisar` | Acepta tracked changes, extrae comentarios al margen y produce `v(N+1).docx`. La skill aplica luego las ediciones que sugieran los comentarios. |
 | `/informe checklist` | Muestra el estado del encargo (✅/⚠️/❌). |
 
@@ -133,7 +133,7 @@ YYYY_NNN_ApellidoCliente_Localidad/
 ├── 05_ensayos/                     ← opcional
 ├── 06_referencias/                 ← normativa, jurisprudencia
 ├── 99_salida/
-│   ├── presupuesto/                ← RTFs exportados de Presto
+│   ├── presupuesto/                ← presupuesto exportado (RTF o los 2 .docx)
 │   └── informe_pericial_vN.docx
 └── _skill_workspace/               ← memoria externa persistente
     ├── inventario.md
@@ -166,7 +166,7 @@ La estructura del informe está en `reference/estructura_macro.md`. La plantilla
 | `leer_notability.py` | Procesa notas manuscritas con/sin OCR |
 | `procesar_fotos.py` | Copia desde Drive, ordena por EXIF, genera Excel de clasificación |
 | `redactar_v1.py` | Ensambla el `.docx` v1 |
-| `presupuestar.py` | Inyecta el presupuesto (RTF) en el v1 → v2 |
+| `presupuestar.py` | Inyecta el presupuesto (RTF o docx) en el v1 → v2 |
 | `revisar.py` | Acepta tracked changes y extrae comentarios → v(N+1) |
 | `checklist.py` | Muestra estado del encargo |
 | `extraer_plantilla.py` | Regenera `plantilla_base.docx` desde un informe existente |
@@ -178,12 +178,13 @@ Todos llevan `--help` y pueden usarse de forma standalone.
 - **Separación inteligencia / maquinaria.** La skill (Claude conversacional) toma las decisiones que requieren criterio profesional (causa, atribución, proporcionalidad de la reparación) y redacta la prosa. Los scripts solo ensamblan, no piensan.
 - **Memoria externa persistente.** Todo lo aprendido durante la ingesta se guarda en `_skill_workspace/` para sobrevivir a compactaciones de contexto.
 - **El humano aprueba antes de fases pesadas.** No se redactan 50 páginas sin checkpoint.
-- **El presupuesto lo hace Arquímedes/Presto, no la skill.** La skill solo trocea e inyecta el RTF exportado del programa de mediciones.
+- **El presupuesto lo hace Arquímedes/Presto, no la skill.** La skill solo trocea e inyecta lo exportado por el programa de mediciones.
 - **Datos faltantes son la norma.** Muchos encargos no tienen proyecto visado ni informe contraria. La skill degrada secciones, no se rompe.
 
 ## Limitaciones conocidas
 
-- Formato de presupuesto: sólo se ha probado con RTF exportado de **Presto/Arquímedes**. Otros programas (TCQ, Menfis, etc.) pueden requerir adaptar el parser en `scripts/presupuestar.py`.
+- Formato de presupuesto: se ha probado con el **RTF de Presto** y con los **.docx de Arquímedes** (`Presupuesto y mediciones` + `Resumen de presupuesto`). Otros programas (TCQ, Menfis, etc.) pueden requerir adaptar el parser en `scripts/presupuestar.py`.
+- El parser de .docx asume el export estándar de Arquímedes en tablas de 6 columnas. Conviene comprobar que la suma de las partidas cuadra con el total del capítulo que imprime el script antes de dar por bueno el `v2`.
 - Tracked changes complejos (filas insertadas/borradas en tablas con `<w:cellIns>`/`<w:cellDel>`) se aceptan, pero casos edge pueden requerir abrir el `.docx` en Word y aceptar manualmente lo que no se haya procesado.
 - El índice (TOC) del `.docx` se inserta como campo Word — hay que pulsar F9 en Word para regenerarlo al abrir el documento.
 - HEIC del iPhone: se convierten a JPG en `_skill_workspace/jpegs/` antes de embeberlos en el `.docx`. Requiere `pillow-heif`.
