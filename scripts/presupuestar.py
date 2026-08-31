@@ -1,11 +1,16 @@
-"""Inyecta el presupuesto de Presto/Arquímedes (.RTF) en el informe v1.
+"""Inyecta el presupuesto de Presto/Arquímedes en el informe v1.
+
+Acepta dos formatos de export:
+- `.rtf` de Presto (texto plano con líneas "CAPÍTULO NN" / "SUBCAPÍTULO NN.MM").
+- `.docx` de Arquímedes (tablas): "Presupuesto y mediciones" + "Resumen de presupuesto".
+Si hay RTF se usa el RTF; si no, los .docx.
 
 Pre-requisitos:
 - `<encargo>/99_salida/informe_pericial_v1.docx` generado por redactar_v1.py
   (con marcadores `[[PRESUPUESTO_DEFICIENCIA: <slug>]]`, `[[COSTE]]`,
   `[[HOJA_RESUMEN_PRESUPUESTO ...]]`)
-- `<encargo>/99_salida/presupuesto/*.rtf` exportado de Presto/Arquímedes.
-  Si hay varios RTF, se usa el más reciente por mtime.
+- `<encargo>/99_salida/presupuesto/*.rtf` exportado de Presto, o bien los `.docx`
+  exportados de Arquímedes. Si hay varios del mismo tipo, se usa el más reciente.
 
 Mapeo deficiencia ↔ subcapítulo:
 - Cada deficiencia en `caso.yaml > deficiencias` puede llevar `subcapitulo_presupuesto: "04.05"`.
@@ -42,6 +47,7 @@ except Exception:
     pass
 
 EXT_RTF = {".rtf"}
+EXT_DOCX = {".docx"}
 
 
 # ────────── Parser RTF de presupuesto Presto ──────────
@@ -270,6 +276,268 @@ def parsear_rtf_presto(rtf_path: Path) -> dict:
     }
 
 
+# ────────── Parser DOCX de presupuesto Arquímedes/Presto ──────────
+#
+# Arquímedes también exporta a .docx dos ficheros:
+#   · "Presupuesto y mediciones - <obra>.docx"  → capítulos, partidas y mediciones
+#   · "Resumen de presupuesto - <obra>.docx"    → PEM + GG + BI + IVA + base de licitación
+# A diferencia del RTF (texto plano con líneas "CAPÍTULO NN"), aquí todo viene en
+# tablas. Este parser devuelve la MISMA estructura que `parsear_rtf_presto`, de modo
+# que el resto del script (mapeo, inyección, hoja resumen) no cambia.
+#
+# Si el export no trae subcapítulos (caso habitual cuando un capítulo cubre una sola
+# deficiencia), se sintetiza un subcapítulo por capítulo marcado con `sintetico: True`
+# para que la unidad de mapeo siga existiendo.
+
+RE_ORDINAL_CAP = re.compile(r"^\d+$")
+RE_ORDINAL_SUB = re.compile(r"^\d+(?:\.\d+)+$")
+RE_TOTAL_CAP_DOCX = re.compile(r"^\s*Total\s+cap[ií]tulo\s+([\d.]+)", re.IGNORECASE)
+RE_TOTAL_SUB_DOCX = re.compile(r"^\s*Total\s+subcap[ií]tulo\s+([\d.]+)", re.IGNORECASE)
+RE_PEM = re.compile(r"presupuesto\s+de\s+ejecuci[oó]n\s+material", re.IGNORECASE)
+
+
+def _celdas(row) -> list:
+    """Texto de cada celda de la fila (las fusionadas se repiten)."""
+    return [c.text.strip() for c in row.cells]
+
+
+def _fila_fusionada(cells: list, desde: int, hasta: int) -> bool:
+    """True si las celdas [desde..hasta] comparten texto, o sea, están fusionadas."""
+    if hasta >= len(cells):
+        return False
+    ref = cells[desde]
+    return all(cells[i] == ref for i in range(desde, hasta + 1))
+
+
+def parsear_docx_arquimedes(docx_path: Path) -> dict:
+    """Parsea el .docx 'Presupuesto y mediciones' de Arquímedes.
+
+    Devuelve la misma estructura que `parsear_rtf_presto`.
+    """
+    doc = Document(str(docx_path))
+
+    capitulos = []
+    subcapitulos_idx = {}
+    cap_actual = None
+    sub_actual = None
+    total_general = Decimal("0")
+
+    def flush_sub():
+        nonlocal sub_actual
+        if sub_actual and cap_actual is not None:
+            cap_actual["subcapitulos"].append(sub_actual)
+            subcapitulos_idx[sub_actual["codigo"]] = sub_actual
+        sub_actual = None
+
+    def flush_cap():
+        nonlocal cap_actual
+        if cap_actual:
+            # Sin subcapítulos explícitos: sintetizar uno que envuelva las partidas sueltas
+            if not cap_actual["subcapitulos"] and cap_actual["_partidas_sueltas"]:
+                sint = {
+                    "codigo": cap_actual["codigo"],
+                    "titulo": cap_actual["titulo"],
+                    "partidas": cap_actual["_partidas_sueltas"],
+                    "total": cap_actual["total"],
+                    "lineas_brutas": [],
+                    "sintetico": True,
+                }
+                cap_actual["subcapitulos"].append(sint)
+                subcapitulos_idx[sint["codigo"]] = sint
+            cap_actual.pop("_partidas_sueltas", None)
+            capitulos.append(cap_actual)
+        cap_actual = None
+
+    for tabla in doc.tables:
+        for row in tabla.rows:
+            cells = _celdas(row)
+
+            if len(cells) < 6:
+                # Tabla auxiliar (PEM suelto, escalado): sólo nos interesa el PEM
+                unidas = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+                if unidas and RE_PEM.search(unidas[0]):
+                    imp = RE_IMPORTE.search(unidas[-1])
+                    if imp:
+                        total_general = _parse_importe(imp.group(1))
+                continue
+
+            c0, c1, c2, c3, c4, c5 = cells[0], cells[1], cells[2], cells[3], cells[4], cells[5]
+
+            # PEM dentro de una tabla de 6 columnas
+            if RE_PEM.search(c0):
+                imp = RE_IMPORTE.search(c5) or RE_IMPORTE.search(" ".join(cells))
+                if imp:
+                    total_general = _parse_importe(imp.group(1))
+                continue
+
+            # Cabecera de columnas. OJO: no basta con mirar la columna "Ud.", porque hay
+            # partidas cuya unidad es literalmente "Ud" y se perderían. Se exige que las
+            # columnas numéricas lleven sus rótulos.
+            if _normalizar(c3) == "cantidad" and _normalizar(c5) == "importe":
+                continue
+
+            # Totales de capítulo / subcapítulo (título fusionado, importe en la última)
+            m_ts = RE_TOTAL_SUB_DOCX.match(c0)
+            if m_ts:
+                imp = RE_IMPORTE.search(c5)
+                if sub_actual is not None and imp:
+                    sub_actual["total"] = _parse_importe(imp.group(1))
+                flush_sub()
+                continue
+            m_tc = RE_TOTAL_CAP_DOCX.match(c0)
+            if m_tc:
+                imp = RE_IMPORTE.search(c5)
+                flush_sub()
+                if cap_actual is not None and imp:
+                    cap_actual["total"] = _parse_importe(imp.group(1))
+                flush_cap()
+                continue
+
+            primera = c0.splitlines()[0].strip() if c0 else ""
+
+            # Cabecera de capítulo: ordinal simple + título fusionado + importe
+            if RE_ORDINAL_CAP.match(primera) and _fila_fusionada(cells, 1, 4):
+                flush_sub()
+                flush_cap()
+                imp = RE_IMPORTE.search(c5)
+                cap_actual = {
+                    "codigo": primera,
+                    "titulo": c1,
+                    "subcapitulos": [],
+                    "total": _parse_importe(imp.group(1)) if imp else Decimal("0"),
+                    "_partidas_sueltas": [],
+                }
+                continue
+
+            # Cabecera de subcapítulo: ordinal compuesto + título fusionado
+            if RE_ORDINAL_SUB.match(primera) and _fila_fusionada(cells, 1, 4):
+                flush_sub()
+                imp = RE_IMPORTE.search(c5)
+                sub_actual = {
+                    "codigo": primera,
+                    "titulo": c1,
+                    "partidas": [],
+                    "total": _parse_importe(imp.group(1)) if imp else Decimal("0"),
+                    "lineas_brutas": [],
+                }
+                continue
+
+            # Partida: "1.1\nADR006" en col0, unidad y tres importes a la derecha
+            if RE_ORDINAL_SUB.match(primera) and c2:
+                lineas_cod = [x.strip() for x in c0.splitlines() if x.strip()]
+                ref = lineas_cod[1] if len(lineas_cod) > 1 else ""
+                lineas_desc = [x.strip() for x in c1.splitlines() if x.strip()]
+                partida = {
+                    "codigo": (primera + " " + ref).strip(),
+                    "ud": c2,
+                    "descripcion_breve": lineas_desc[0] if lineas_desc else "",
+                    "descripcion_larga": lineas_desc[1:],
+                    "mediciones": [],
+                    "cantidad": _parse_importe(c3),
+                    "precio": _parse_importe(c4),
+                    "importe": _parse_importe(c5),
+                }
+                if sub_actual is not None:
+                    sub_actual["partidas"].append(partida)
+                elif cap_actual is not None:
+                    cap_actual["_partidas_sueltas"].append(partida)
+                continue
+
+    flush_sub()
+    flush_cap()
+
+    if total_general == 0:
+        total_general = sum((c["total"] for c in capitulos), Decimal("0"))
+
+    return {
+        "capitulos": capitulos,
+        "subcapitulos_por_codigo": subcapitulos_idx,
+        "total_general": total_general,
+    }
+
+
+def parsear_resumen_docx(docx_path) -> list:
+    """Lee el .docx 'Resumen de presupuesto' y devuelve el escalado del presupuesto
+    como [(concepto, importe)]: ejecución material, gastos generales, beneficio
+    industrial, ejecución por contrata, IVA y base de licitación.
+
+    Devuelve [] si no existe o no tiene la tabla esperada.
+    """
+    if not docx_path or not Path(docx_path).exists():
+        return []
+    claves = ("ejecucion material", "gastos generales", "beneficio industrial",
+              "ejecucion por contrata", "iva", "base de licitacion")
+    out = []
+    try:
+        doc = Document(str(docx_path))
+    except Exception:
+        return []
+    for tabla in doc.tables:
+        for row in tabla.rows:
+            cells = [c.text.strip() for c in row.cells]
+            unidas = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+            if len(unidas) < 2:
+                continue
+            etiqueta = unidas[0]
+            norm = _normalizar(etiqueta)
+            if not any(_normalizar(k) in norm for k in claves):
+                continue
+            imp = RE_IMPORTE.search(unidas[-1])
+            if not imp:
+                continue
+            if any(_normalizar(e) == norm for e, _ in out):
+                continue
+            out.append((etiqueta, _parse_importe(imp.group(1))))
+    return out
+
+
+def localizar_presupuesto(pres_dir: Path):
+    """Elige el fichero de presupuesto de `pres_dir`.
+
+    Prioriza RTF (ruta original de Presto). Si no hay, usa los .docx de Arquímedes,
+    distinguiendo "Presupuesto y mediciones" de "Resumen de presupuesto" por el título
+    del documento, y por el nombre de fichero como respaldo.
+
+    Devuelve (formato, ruta_mediciones, ruta_resumen_o_None).
+    """
+    rtfs = sorted([p for p in pres_dir.iterdir()
+                   if p.is_file() and p.suffix.lower() in EXT_RTF],
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    if rtfs:
+        return "rtf", rtfs[0], None
+
+    docxs = sorted([p for p in pres_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() in EXT_DOCX
+                    and not p.name.startswith("~$")],
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    if not docxs:
+        raise FileNotFoundError("no hay .rtf ni .docx en " + str(pres_dir))
+
+    mediciones = resumen = None
+    for p in docxs:
+        pista = ""
+        try:
+            d = Document(str(p))
+            for par in d.paragraphs[:5]:
+                if par.text.strip():
+                    pista = _normalizar(par.text)
+                    break
+        except Exception:
+            pass
+        pista = pista or _normalizar(p.stem)
+        if "resumendepresupuesto" in pista or pista.startswith("resumen"):
+            resumen = resumen or p
+        elif "presupuestoymediciones" in pista or "mediciones" in pista:
+            mediciones = mediciones or p
+    if mediciones is None:
+        restantes = [p for p in docxs if p != resumen]
+        if not restantes:
+            raise FileNotFoundError(
+                "en " + str(pres_dir) + " sólo está el resumen; falta 'Presupuesto y mediciones'")
+        mediciones = restantes[0]
+    return "docx", mediciones, resumen
+
+
 # ────────── Mapeo deficiencia ↔ subcapítulo ──────────
 
 def mapear_deficiencias(deficiencias: list[dict], presupuesto: dict, caso: dict) -> dict[str, dict]:
@@ -298,6 +566,15 @@ def mapear_deficiencias(deficiencias: list[dict], presupuesto: dict, caso: dict)
             if m and m.group(1) in subcaps:
                 out[slug] = subcaps[m.group(1)]
                 continue
+            # Export sin subcapítulos: el capítulo es la unidad de mapeo ("CAPÍTULO 01")
+            m_cap = re.search(r"cap[ií]tulo\s*0*(\d+)", str(codigo_explicito), re.IGNORECASE)
+            if m_cap:
+                for cand in (m_cap.group(1), m_cap.group(1).zfill(2)):
+                    if cand in subcaps:
+                        out[slug] = subcaps[cand]
+                        break
+                if out.get(slug):
+                    continue
         # Fuzzy: slug normalizado debe estar contenido en el título normalizado
         slug_norm = _normalizar(slug)
         candidatos = []
@@ -312,6 +589,14 @@ def mapear_deficiencias(deficiencias: list[dict], presupuesto: dict, caso: dict)
             out[slug] = None
         else:
             out[slug] = None
+
+    # Último recurso: una sola deficiencia y un solo subcapítulo → asignación directa
+    sin_asignar = [s for s, v in out.items() if v is None]
+    if len(sin_asignar) == 1 and len(subcaps) == 1:
+        unico = next(iter(subcaps.values()))
+        out[sin_asignar[0]] = unico
+        print(f"AVISO: '{sin_asignar[0]}' asignado por descarte al único capítulo del "
+              f"presupuesto ({unico['codigo']} — {unico['titulo']}).", file=sys.stderr)
     return out
 
 
@@ -331,9 +616,12 @@ def construir_bloque_subcapitulo(doc, subcap: dict, anchor_para) -> None:
         body.insert(anchor_idx, elemento_xml)
         anchor_idx += 1
 
-    # Encabezado del subcapítulo (párrafo en negrita)
+    # Un subcapítulo sintetizado a partir de un capítulo se rotula como capítulo
+    etiqueta = "Capítulo" if subcap.get("sintetico") else "Subcapítulo"
+
+    # Encabezado (párrafo en negrita)
     p = doc.add_paragraph()
-    r = p.add_run(f"Subcapítulo {subcap['codigo']} — {subcap['titulo']}")
+    r = p.add_run(f"{etiqueta} {subcap['codigo']} — {subcap['titulo']}")
     r.bold = True
     r.font.size = Pt(11)
     _insertar(p._p)
@@ -364,7 +652,7 @@ def construir_bloque_subcapitulo(doc, subcap: dict, anchor_para) -> None:
                 larga = larga[:197] + "..."
             desc = f"{desc}\n{larga}"
         row[2].text = desc
-        row[3].text = f"{partida['cantidad']:.2f}".replace(".", ",")
+        row[3].text = _fmt_eur(partida["cantidad"]).replace(" €", "")
         row[4].text = _fmt_eur(partida["precio"]).replace(" €", "")
         row[5].text = _fmt_eur(partida["importe"]).replace(" €", "")
         # Reducir font de toda la fila
@@ -377,7 +665,7 @@ def construir_bloque_subcapitulo(doc, subcap: dict, anchor_para) -> None:
     # Total subcapítulo (párrafo derecha)
     p_total = doc.add_paragraph()
     p_total.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r = p_total.add_run(f"TOTAL SUBCAPÍTULO {subcap['codigo']}: {_fmt_eur(subcap['total'])}")
+    r = p_total.add_run(f"TOTAL {etiqueta.upper()} {subcap['codigo']}: {_fmt_eur(subcap['total'])}")
     r.bold = True
     _insertar(p_total._p)
 
@@ -442,14 +730,14 @@ def main(argv: list[str]) -> int:
         print(f"ERROR: no existe {pres_dir}", file=sys.stderr)
         return 1
 
-    rtfs = sorted([p for p in pres_dir.iterdir()
-                    if p.is_file() and p.suffix.lower() in EXT_RTF],
-                   key=lambda p: p.stat().st_mtime, reverse=True)
-    if not rtfs:
-        print(f"ERROR: no hay .rtf en {pres_dir}", file=sys.stderr)
+    try:
+        formato, pres_file, resumen_file = localizar_presupuesto(pres_dir)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
         return 1
-    rtf = rtfs[0]
-    print(f"Usando presupuesto: {rtf.name}")
+    print(f"Usando presupuesto: {pres_file.name}  [{formato.upper()}]")
+    if resumen_file:
+        print(f"Resumen de presupuesto:  {resumen_file.name}")
 
     # caso.yaml
     caso = yaml.safe_load((encargo / "caso.yaml").read_text(encoding="utf-8")) or {}
@@ -467,7 +755,12 @@ def main(argv: list[str]) -> int:
         return 1
 
     # Parsear presupuesto
-    presupuesto = parsear_rtf_presto(rtf)
+    if formato == "rtf":
+        presupuesto = parsear_rtf_presto(pres_file)
+        escalado = []
+    else:
+        presupuesto = parsear_docx_arquimedes(pres_file)
+        escalado = parsear_resumen_docx(resumen_file)
     print(f"Capítulos detectados: {len(presupuesto['capitulos'])}")
     print(f"Subcapítulos detectados: {len(presupuesto['subcapitulos_por_codigo'])}")
     print(f"Total general detectado: {_fmt_eur(presupuesto['total_general'])}")
@@ -556,15 +849,29 @@ def main(argv: list[str]) -> int:
             row[0].text = f"{cap['codigo']}. {cap['titulo']}"
             row[1].text = _fmt_eur(cap["total"]).replace(" €", "")
             row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        # Fila total general
+        # Fila de total: si hay escalado detrás, este total es el PEM
         row = tabla.add_row().cells
-        row[0].text = "TOTAL GENERAL"
+        row[0].text = "TOTAL EJECUCIÓN MATERIAL (PEM)" if escalado else "TOTAL GENERAL"
         row[1].text = _fmt_eur(presupuesto["total_general"]).replace(" €", "")
         for cell in row:
             for p_h in cell.paragraphs:
                 for r_h in p_h.runs:
                     r_h.bold = True
         row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+        # Escalado: gastos generales, beneficio industrial, contrata, IVA, licitación
+        for etiqueta_esc, importe_esc in escalado:
+            if "ejecucionmaterial" in _normalizar(etiqueta_esc):
+                continue  # ya figura arriba como PEM
+            row = tabla.add_row().cells
+            row[0].text = etiqueta_esc
+            row[1].text = _fmt_eur(importe_esc).replace(" €", "")
+            row[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            if "licitacion" in _normalizar(etiqueta_esc):
+                for cell in row:
+                    for p_h in cell.paragraphs:
+                        for r_h in p_h.runs:
+                            r_h.bold = True
 
         body.insert(anchor_idx, tabla._tbl)
         eliminar_parrafo(para)
@@ -580,7 +887,8 @@ def main(argv: list[str]) -> int:
         print(f"     AVISO: {n_no_encontrados} deficiencias sin subcapítulo (marcador [[SUBCAPÍTULO NO ENCONTRADO]] en el docx)")
     print(f"     Costes en cuadro resumen: {n_costes}/{len(deficiencias)}")
     if parrafos_resumen:
-        print(f"     Hoja resumen presupuesto: tabla con {len(presupuesto['capitulos'])} capítulos + total general")
+        extra = f" + escalado ({len(escalado)} conceptos)" if escalado else " + total general"
+        print(f"     Hoja resumen presupuesto: tabla con {len(presupuesto['capitulos'])} capítulos{extra}")
     return 0
 
 

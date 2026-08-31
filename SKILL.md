@@ -385,35 +385,44 @@ Salida: `99_salida/informe_pericial_v1.docx`.
 
 ### `/informe presupuestar` (o "inyecta el presupuesto")
 
-**Pre-requisito:** Javier ha exportado de Presto/Arquímedes **un fichero `.RTF`** a `99_salida/presupuesto/`. El nombre puede ser cualquiera — si hay varios, se usa el más reciente. Si hay versiones (p.ej. `..._02_02_...`, `..._03_03_...`), el script toma el último mtime.
+**Pre-requisito:** Javier ha exportado el presupuesto a `99_salida/presupuesto/`, en cualquiera de los dos formatos admitidos:
 
-**Estructura del RTF de Presto** (lo que el parser espera):
+- **`.rtf` de Presto** — un único fichero. El nombre puede ser cualquiera; si hay varios, se usa el más reciente por mtime.
+- **`.docx` de Arquímedes** — los dos que exporta el programa: `Presupuesto y mediciones - <obra>.docx` (capítulos y partidas) y `Resumen de presupuesto - <obra>.docx` (escalado GG/BI/IVA hasta base de licitación). El segundo es opcional: sin él la hoja resumen sale sólo hasta PEM.
+
+Si hay RTF, se usa el RTF. Los dos ficheros `.docx` se distinguen por el título del documento, no por el nombre de archivo.
+
+**Estructura del RTF de Presto** (lo que el parser de RTF espera):
 - Capítulos: línea `CAPÍTULO NN <título>`
 - Subcapítulos: línea `SUBCAPÍTULO NN.MM <título>` — **cada subcapítulo mapea a UNA deficiencia**
 - Partidas: línea `NN.MM.PP <ud> <descripción>` + descripción larga + líneas de medición + total partida
 - Totales: `TOTAL SUBCAPÍTULO NN.MM ... <importe>`, `TOTAL CAPÍTULO NN ... <importe>`, `TOTAL <importe general>`
 
+**Estructura del .docx de Arquímedes** (lo que el parser de docx espera): todo viene en tablas de 6 columnas — `Nº · Código | Descripción y mediciones | Ud. | Cantidad | Precio | Importe`. La cabecera de capítulo es una fila con el ordinal y el título fusionado; el cierre, una fila `Total capítulo N`. Si el export **no trae subcapítulos** (habitual cuando un capítulo cubre una sola deficiencia), el parser sintetiza uno por capítulo para conservar la unidad de mapeo, y el bloque inyectado se rotula «Capítulo» en lugar de «Subcapítulo».
+
 **Mapeo deficiencia ↔ subcapítulo** (en este orden de prioridad):
 1. `caso.yaml > deficiencias[i].subcapitulo_presupuesto: "04.05"` (código directo). Es el que la skill rellena al fijar deficiencias o como parte de la conversación con Javier antes de presupuestar.
-2. Match fuzzy entre el slug normalizado y el título del subcapítulo (sin acentos, sin guiones bajos).
-3. Si no hay match único → marcador `[[SUBCAPÍTULO NO ENCONTRADO]]` y aviso al final.
+2. Número de capítulo en `capitulo_presupuesto` (p.ej. `CAPÍTULO 01` → capítulo `1`), para exports sin subcapítulos.
+3. Match fuzzy entre el slug normalizado y el título del subcapítulo (sin acentos, sin guiones bajos).
+4. Si queda exactamente una deficiencia sin asignar y exactamente un subcapítulo libre, se asignan por descarte (con aviso).
+5. Si no hay match único → marcador `[[SUBCAPÍTULO NO ENCONTRADO]]` y aviso al final.
 
 **Conducta antes de invocar el script:**
 
-1. Pedir a Javier que confirme que ha exportado el RTF a `99_salida/presupuesto/`.
-2. Parsear el RTF con `presupuestar.py` (en modo dry-run conceptual: leerlo y mostrar la lista de subcapítulos detectados).
-3. Para cada deficiencia que NO tenga `subcapitulo_presupuesto` en `caso.yaml`, presentar a Javier los subcapítulos del RTF y pedirle que asigne el código (`04.05`, etc.). Aplicar al `caso.yaml` y a `deficiencias.md`.
+1. Pedir a Javier que confirme que ha exportado el presupuesto a `99_salida/presupuesto/` (RTF de Presto, o los dos .docx de Arquímedes).
+2. Parsear el presupuesto con `presupuestar.py` (en modo dry-run conceptual: leerlo y mostrar la lista de capítulos/subcapítulos detectados). **Comprobar que la suma de las partidas cuadra con el total del capítulo** antes de inyectar nada: un descuadre delata partidas perdidas por el parser.
+3. Para cada deficiencia que NO tenga `subcapitulo_presupuesto` en `caso.yaml`, presentar a Javier los subcapítulos detectados y pedirle que asigne el código (`04.05`, etc.). Aplicar al `caso.yaml` y a `deficiencias.md`.
 4. Ejecutar `presupuestar.py`:
    ```
    python scripts/presupuestar.py --encargo "<ruta>"
    ```
 
 **Lo que hace el script:**
-- Parsea el RTF, agrupa partidas por subcapítulo, calcula totales.
+- Parsea el presupuesto (RTF o docx), agrupa partidas por subcapítulo, calcula totales.
 - Carga `informe_pericial_v1.docx`.
 - Para cada `[[PRESUPUESTO_DEFICIENCIA: <slug>]]` del v1, lo sustituye por una **tabla** con las partidas del subcapítulo (Código, Ud, Descripción, Cantidad, Precio €, Importe €) más una fila final con `TOTAL SUBCAPÍTULO NN.MM`.
 - Rellena la columna `Coste reparación` del cuadro resumen final con el total de cada deficiencia.
-- Sustituye `[[HOJA_RESUMEN_PRESUPUESTO ...]]` por una tabla `Capítulo | Importe (€)` con el total de cada capítulo + fila `TOTAL GENERAL`.
+- Sustituye `[[HOJA_RESUMEN_PRESUPUESTO ...]]` por una tabla `Capítulo | Importe (€)` con el total de cada capítulo + fila de total. Si se ha leído el «Resumen de presupuesto» de Arquímedes, esa fila pasa a ser `TOTAL EJECUCIÓN MATERIAL (PEM)` y debajo se añade el escalado: gastos generales, beneficio industrial, presupuesto de ejecución por contrata, IVA y base de licitación.
 - Guarda como `99_salida/informe_pericial_v2.docx`.
 
 **Tras ejecutar**:
@@ -492,7 +501,7 @@ YYYY_NNN_ApellidoCliente_Localidad/
 ├── 05_ensayos/                     ← opcional
 ├── 06_referencias/                 ← normativa, jurisprudencia, fichas técnicas
 ├── 99_salida/
-│   ├── presupuesto/                ← los 2 docx de Arquímedes
+│   ├── presupuesto/                ← RTF de Presto, o los 2 docx de Arquímedes
 │   └── informe_pericial_vN.docx
 └── _skill_workspace/               ← memoria externa persistente:
                                     inventario.md, briefing.md,
